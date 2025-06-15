@@ -1,72 +1,124 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createMetadata, Metadata, ValidatedMetadata } from '@sherrylinks/sdk';
+import { avalancheFuji } from 'viem/chains';
+import { createMetadata, ValidatedMetadata, ExecutionResponse, Metadata } from '@sherrylinks/sdk';
+import { serialize } from 'wagmi';
+import { encodeFunctionData, TransactionSerializable } from 'viem';
+
+import { abi } from '@/blockchain/abi';
+
+const CONTRACT_ADDRESS = '0x81AeC0B87CAa631365B0AC0B628A84afdf6f1Fe9';
 
 export async function GET(req: NextRequest) {
-    try {
-        // Get server base URL
-        const host = req.headers.get('host') || 'localhost:3000';
-        const protocol = req.headers.get('x-forwarded-proto') || 'http';
-        
-        //construct the base url
-        const serverUrl = `${protocol}://${host}`;
+  try {
+    // Get server base URL
+    const host = req.headers.get('host') || 'localhost:3000';
+    const protocol = req.headers.get('x-forwarded-proto') || 'http';
+    const serverUrl = `${protocol}://${host}`;
 
-        const metadata: Metadata = {
-            url: "https://sherry.social", // Your main website URL
-            icon: "hhttps://drive.google.com/uc?export=view&id=1S-S6BzeV52cMsWuR6JAOTkKxHRlYuM9K", // Your app icon URL
-            title: "Timestamped Message", // Title that will appear on platforms
-            baseUrl: serverUrl, // Base URL where your app is hosted
-            description: "Store a message with an optimized timestamp calculated by our algorithm",
-            
-            // define actions that can be done by users
-            actions: [
-                {
-                    type: 'dynamic', // Action type (always "dynamic" for mini apps)
-                    label: 'Store Message', // Text that will appear on the button
-                    description: 'Store your message with a custom timestamp calculated for optimal storage',
-                    chains: {
-                        source: 'fuji', // Blockchain where it will execute (fuji = Avalanche Fuji Testnet)
-                    },
-                    path: `/api/my-app`, // Path of the POST endpoint that will handle execution
+    const metadata: Metadata = {
+      url: "https://sherry.social",
+      icon: "https://drive.google.com/uc?export=view&id=1S-S6BzeV52cMsWuR6JAOTkKxHRlYuM9K",
+      title: "Add XP to Player",
+      baseUrl: serverUrl,
+      description: "Give XP to a player and auto-level them up on-chain",
 
-                    params: [
-                        {
-                            name: 'message', // Parameter name (will be used as query param)
-                            label: 'Your Message', // Label that the user will see
-                            type: 'text', // Input type (text, number, email, etc.)
-                            required: true, // Whether it's mandatory or not
-                            description: 'Enter the message you want to store on the blockchain',
-                        },
-                        {
-                            name: 'amount',
-                            label: 'Amount (ETH)',
-                            type: 'number',
-                            required: false,
-                            description: 'Amount in ETH (optional)',
-                        },
-                    ],
-                },
-            ]
-        };
-        // Validate metadata using SDK
-        const validated: ValidatedMetadata = createMetadata(metadata);
+      actions: [
+        {
+          type: 'dynamic',
+          label: 'Add XP',
+          description: 'Award XP to a player and mint badge on level up',
+          chains: {
+            source: 'fuji',
+          },
+          path: `/api/my-app`,
 
-        // Return with CORS headers
-        return NextResponse.json(validated, {
-        headers: {
+          params: [
+            {
+              name: 'player',
+              label: 'Player Address',
+              type: 'text',
+              required: true,
+              description: 'Wallet address of the player',
+            },
+            {
+              name: 'xp',
+              label: 'XP Amount',
+              type: 'number',
+              required: true,
+              description: 'Amount of XP to award',
+            },
+          ],
+        },
+      ],
+    };
+
+    const validated: ValidatedMetadata = createMetadata(metadata);
+
+    return NextResponse.json(validated, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      },
+    });
+  } catch (error) {
+    console.error('Metadata Error:', error);
+    return NextResponse.json({ error: 'Failed to create metadata' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const player = searchParams.get('player');
+    const xp = searchParams.get('xp');
+
+    if (!player || !xp) {
+      return NextResponse.json(
+        { error: 'Missing required parameters' },
+        {
+          status: 400,
+          headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        },
-        });
-        } catch (error) {
-    console.error('Error creating metadata:', error);
-    return NextResponse.json(
-      { error: 'Failed to create metadata' },
-      {
-        status: 500,
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          },
+        }
+      );
+    }
+
+    const data = encodeFunctionData({
+      abi: abi,
+      functionName: 'addXP',
+      args: [player as `0x${string}`, BigInt(xp)],
+    });
+
+    const tx: TransactionSerializable = {
+      to: CONTRACT_ADDRESS,
+      data: data,
+      chainId: avalancheFuji.id,
+      type: 'legacy',
+    };
+
+    const serialized = serialize(tx);
+
+    const resp: ExecutionResponse = {
+      serializedTransaction: serialized,
+      chainId: avalancheFuji.name,
+    };
+
+    return NextResponse.json(resp, {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       },
-    );
+    });
+  } catch (error) {
+    console.error('POST Error:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
-};
+}
 
 export async function OPTIONS(request: NextRequest) {
   return new NextResponse(null, {
